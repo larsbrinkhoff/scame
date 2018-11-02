@@ -1,0 +1,2445 @@
+Relay-Version: version B 2.10 5/3/83; site utzoo.UUCP
+Posting-Version: version B 2.10.1 6/24/83 (MC840302); site erix.UUCP
+Path: utzoo!watmath!clyde!burl!ulysses!allegra!mit-eddie!godot!harvard!seismo!mcvax!enea!erix!leif
+From: leif@erix.UUCP (Leif Samuelsson)
+Newsgroups: net.sources
+Subject: SCAME (part 3 of 5)
+Message-ID: <738@erix.UUCP>
+Date: Fri, 15-Feb-85 21:02:47 EST
+Article-I.D.: erix.738
+Posted: Fri Feb 15 21:02:47 1985
+Date-Received: Mon, 11-Feb-85 05:45:27 EST
+Reply-To: leif@erisun.UUCP (Leif Samuelsson)
+Organization: Ericsson Information Systems, Sundbyberg, Sweden
+Lines: 2430
+Keywords: editor, emacs
+
+# This is a shell archive.  Remove anything before this line,
+# then unpack it by saving it in a file and typing "sh file".
+#
+# Wrapped by erisun!leif on Sat Feb  9 18:13:17 MET 1985
+# Contents:  main.c screen.c scame0.c scame1.c
+ 
+echo x - main.c
+sed 's/^@//' > "main.c" <<'@//E*O*F main.c//'
+/*	SCAME main.c				*/
+
+/*	Version 1.0.0	1985-01-30		*/
+
+static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+
+#include "scame.h"
+#ifdef BSD42
+# include <sys/file.h>
+#endif
+
+
+/* global variables */
+struct bufstruct buftab[MAXBUFS], cb = {
+	"Main",
+	"gazonk",
+	0,
+	0,
+	FUNDAMENTAL,
+	FALSE,
+	(time_t) 0,
+	{ 0L },
+	{ -1, 72 }
+};
+
+struct gvarstruct gvars = {
+		500,		/* Auto Push Point Option */
+		100,		/* Bottom Display Margin */
+		  0,		/* Cbreak Mode */
+		 33,		/* Comment Column */
+		  0,		/* Hackmatic */
+	MAILCHECKINTERVAL,	/* Mail Check Interval */
+		 17,		/* Quote Char (^Q) */
+		 18,		/* Search Backward (^R) */
+		 27,		/* Search Exit Char (^@) */
+		 19,		/* Search Forward (^S) */
+		  0,		/* System Output Holding */
+		  0,		/* Tab Self Insert */
+		  0		/* Top Display Margin */
+};
+
+int cmdchar;
+int noofbufs = 1;
+int bufno = 0;
+int oldbuf = -1;
+int otherbuf;			/* Buffer of other window */
+char *buf;
+char currentdir[FILENAMESIZE];
+char mailfile[FILENAMESIZE];
+char *username;
+char tempfile[] = TMPFILE;
+char scamelib[] = SCAMELIB;
+char *modes[] = {
+	"Ada",
+	"C",
+	"Fundamental",
+	"Lisp",
+	"Pascal",
+	"Swedish"
+};
+char more[]="--MORE--",
+     killbuffile[FILENAMESIZE],
+     kbdmacfile[FILENAMESIZE],
+     screen[SCRDIMY][SCRDIMX+1],
+     oldscreen[SCRDIMY][SCRDIMX+1],
+     commandprompt[80]="",
+     fillprefix[80]="",
+     tmpmode_string[80]="";
+char *dot, *z, *home, *oldhome, *away, *mark[16], *otherdot, *otherhome;
+char *gaps, *gape;
+int     upcasearr[512], nupcasarr[512];
+long bufsize;
+int cury, curx, linpos;
+int screenlen,screenwidth;
+int windows=1;			/* Number of windows */
+int wintop, winbot;		/* Top and bottom of window */
+int oldhpos;			/* used for moving up or down */
+Bool savehpos=FALSE;
+Bool	killing,
+	control_prefix = FALSE,
+	meta_prefix = FALSE,
+	echobusy = FALSE,
+	updateflag = FALSE,
+	typing = FALSE, savearg = FALSE;
+long	arg;
+Bool	xarg,xxarg;		/* xarg  => argument has been given	 */
+				/* xxarg => explicit arg has been given, */
+				/* 	not only C-U			 */
+int pipeup[2], pipedown[2];
+int uid;			/* user id. */
+int ppid;			/* parent process id. */
+char lastinput[LASTINPUTSIZE];
+int lstindex = 0;
+Bool	defining_kbd_mac = FALSE,
+	quiet = FALSE;
+int	kbdmfd, execfd = -1;
+long	chkmailcnt;
+int	recursive_level = 0;
+Bool	pop_pending = FALSE;
+#ifdef SIGTSTP
+char lockfile[FILENAMESIZE];
+#endif
+
+
+main(argc,argv)
+int argc;
+char **argv;
+{
+/*
+Bool updflg;
+*/
+
+  initupcase();
+  ppid = getppid();
+  uid = getuid();
+  if (!isatty(0)) {
+	printf("Sorry, but SCAME must communicate directly with a terminal\n");
+	exit(1);
+  }
+  if (getenv("TERM") == NIL) {
+		printf("You haven't set the terminal type, please do\
+ \"man scame\"\n");
+ 	exit(1);
+  }
+#ifdef SIGTSTP
+  { int fd;
+	sprintf(lockfile, tempfile, ppid, uid);
+	strcat(lockfile, "S");
+	if ((fd=open(lockfile, 0)) >= 0
+#ifdef BSD42
+		&& flock(fd, LOCK_EX | LOCK_NB) != 0
+#endif
+		) {
+		printf("You have Scame already running somewhere\n");
+		exit(1);
+	}
+	creat(lockfile, 0600);
+#ifdef BSD42
+	flock(fd, LOCK_EX | LOCK_NB);
+#endif
+  }
+#endif
+  getwd(currentdir);
+  free(malloc(0x80));		/* For getchar(). */
+  buf=sbrk(0);			/* Obtain the startaddress of the buffer */
+  bufsize = 0;
+  dot=home=z=otherdot=otherhome=gaps=gape=buf;
+  away=NIL;
+  oldhome= NIL;
+#ifdef PDP11
+  inittypeaheadcheck();
+#endif
+  gotobegin();
+  for (lstindex = LASTINPUTSIZE; lstindex > 0;)
+	lastinput[--lstindex] = 0200;
+  gettermtype();
+  setupterm(TRUE);
+  wintop = 0;
+  winbot = screenlen-3;
+  sprintf(killbuffile, tempfile, ppid, uid);
+  strcat(killbuffile, "k");
+  sprintf(kbdmacfile, tempfile, ppid, uid);
+  strcat(kbdmacfile, "m");
+  username = getenv("USER");
+  sprintf(mailfile, "%s/%s", MAILDIR, username);
+  checkmail(FALSE);
+
+if ((argc == 1 || argv[1][0] != '-') && restart()) {
+	ttycbreak();
+	cls();
+	while (--argc > 0) {
+		if (argv[argc][0] != '-') {
+			buildfilename(cb.filename,argv[argc]);
+			findfile();
+			fixbuftab(PUT);
+		}
+	}
+}
+else {
+int i;
+	cls();
+	execfile(".scamerc");
+	i=1;
+	while (argc > i && argv[i][0] == '-') i++;
+	if (argc > i) buildfilename(cb.filename,argv[i]);
+	findmode();
+	readfile();
+	cb.modified=FALSE;
+	while (--argc > i) {
+		if (argv[argc][0] != '-') {
+			fixbuftab(PUT);
+			buildfilename(cb.filename,argv[argc]);
+			findfile();
+		}
+	}
+}
+killing=FALSE;
+*mark=buf;
+
+  editloop();
+  exitscame(0);
+}	/* end of main */
+
+
+exitscame(code)
+int code;
+{
+	if (!code) {
+		savescame();
+		if (CE != NIL) {
+			cur(screenlen-2,0);
+			cleol(FALSE);
+		}
+		cur(screenlen-1,0);
+		setupterm(FALSE);
+		pchar('\n');
+	}
+#ifdef SIGTSTP
+	unlink(lockfile);
+#endif
+	exit(code);
+}
+
+
+editloop()
+{
+int c;
+	if (execfd < 0) recursive_level++;
+	update();
+	if (!quiet) {
+		modeline();
+		refresh(TRUE);
+	}
+/*	cur(cury,curx); */
+	oldhpos = curx;
+	while (!pop_pending) {
+		if (control_prefix || meta_prefix) {
+			if (xarg) sprintf(commandprompt,"%ld ",arg);
+			else *commandprompt = '\0';
+			if (control_prefix) strcat(commandprompt, "C-");
+			if (meta_prefix) strcat(commandprompt, "M-");
+		}
+		else if (!savearg) {
+			arg=1;
+			xarg=xxarg=FALSE;
+			*commandprompt = '\0';
+		}
+		savearg = FALSE;
+		c=inchar(TRUE);
+		if (c == EOF) return;
+		if (c & 0200) meta_prefix=TRUE;
+		if ((c & 0177) == '\007') {
+			if (!quiet) pchar(BELL);
+			control_prefix = meta_prefix = FALSE;
+			if (!quiet && echobusy) clearecho();
+		}
+		else {
+			if ((c & 0177) >= 0 && (c & 0177) < 32)
+				c = (c + '@') | 0400;
+			if (control_prefix) c = b_control(c);
+			if (meta_prefix) c = b_meta(c);
+			control_prefix = meta_prefix = FALSE;
+fflush(stdout);
+			cmdchar = c;
+			(*disptab[cmdchar])();
+		}
+		if (typing) {
+			int ch;
+			typing = FALSE;
+			*commandprompt = '\0';
+			ch = inchar(TRUE);
+			if (ch == EOF) return;
+			if (execfd < 0 && ch != ' ')
+				unget(ch);
+		}
+		if (updateflag || dot<home || dot>away || home != oldhome) {
+			update();
+			modeline();
+		}
+		else findxy();
+		if (!(pop_pending || quiet)) refresh(TRUE);
+/*
+		if (!typeahead() && (cury != vpos || curx != hpos))
+			cur(cury,curx);
+		if (c!= '\007' && c!= '\016' && c != '\020' && c!= '\0207')
+*/
+		if (!savehpos)
+			oldhpos = curx;
+		else
+			savehpos = FALSE;
+		if (!(quiet || echobusy || --chkmailcnt)) checkmail(TRUE);
+		echobusy = FALSE;
+	}
+	if (execfd < 0) recursive_level--;
+	pop_pending = FALSE;
+}
+
+
+
+recurse()
+{
+char tstr[SCRDIMX+1];
+	strcpy(tstr, tmpmode_string);
+	*tmpmode_string = '\0';
+	editloop();
+	tmodlin(tstr);
+}
+
+@//E*O*F main.c//
+chmod u=rw,g=r,o= main.c
+ 
+echo x - screen.c
+sed 's/^@//' > "screen.c" <<'@//E*O*F screen.c//'
+/*	SCAME screen.c				*/
+
+/*	Revision 1.0.0  1985-02-09		*/
+
+static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+
+# include "scame.h"
+
+update()
+{
+register char *tdot;
+register int i, j, y, x;
+int sw = screenwidth-1;
+int wb;
+	upd2();
+	if (typeahead()) return;
+	for (j=(windows > 1 && bufno == otherbuf); j >= 0; j--) {
+		y=wintop;
+		x=0;
+/*
+		upd2();
+*/
+		wb=winbot+1;
+		tdot=home;
+		if (away < z) {
+			while (y<wb) {
+/* vvvvvvvvvvvvvvvv THIS CODE IS DOUBLED FOR SPEED */
+				if (*tdot == '\n') {
+					screen[y++][x]='\0'; x = -1; }
+				else {
+				    if (x==sw) {
+				    	screen[y][x]='!';
+					screen[y++][++x]='\0';
+					x=0; }
+				    if (*tdot == '\t') {
+					i = min(x+TABWID-(x&7), sw);
+					while (x < i)
+						screen[y][x++]=' ';
+					x--;
+				    }
+				    else if (*tdot < ' ' || *tdot == DEL) {
+					screen[y][x++]='^';
+					if (x==sw){
+						screen[y][x]='!';
+						screen[y++][++x]='\0';
+						x=0;}
+					screen[y][x] = *tdot + 64;
+				    }
+				    else  screen[y][x] = *tdot;
+				}			
+				tdot++; x++;
+			}
+		}
+/* ^^^^^^^^^^^^^^^^ */
+		else {
+			while (tdot<z) {
+/* vvvvvvvvvvvvvvvv */
+				if (*tdot == '\n') {
+					screen[y++][x]='\0'; x = -1; }
+				else {
+				    if (x==sw) {
+				    	screen[y][x]='!';
+					screen[y++][++x]='\0';
+					x=0; }
+				    if (*tdot == '\t') {
+					i = min(x+TABWID-(x&7), sw);
+					while (x < i)
+						screen[y][x++]=' ';
+					x--;
+				    }
+				    else if (*tdot < ' ' || *tdot == DEL) {
+					screen[y][x++]='^';
+					if (x==sw){
+						screen[y][x]='!';
+						screen[y++][++x]='\0';
+						x=0;}
+					screen[y][x] = *tdot + 64;
+				    }
+				    else  screen[y][x] = *tdot;
+				}			
+				tdot++; x++;
+			}
+/* ^^^^^^^^^^^^^^^^ */
+			if (y < wb) screen[y][x]='\0';
+			while (++y < wb) *screen[y]='\0';
+		}
+		if (j) { otherwindow(); upd2(); }
+	}
+	if (windows > 1 && bufno == otherbuf) { otherwindow(); upd2(); }
+	oldhome = home;
+	updateflag = FALSE;
+}
+
+upd2()				/* Updates the values of home,	*/
+{				/* curx, cury and away.		*/
+register char *tdot;
+register int i;
+int y=wintop;
+register int x=0;
+int sw=screenwidth-1;
+	if (gaps < home + GAPDIST) closegap();
+	if (dot < home) {
+		home = dot;
+		while (home > buf && *(home-1) != '\n') home--;
+		center();
+	}
+	tdot=home;
+	while (y < winbot+1 && tdot < z) {
+	    if (tdot==dot) { curx=x; cury=y; }
+	    if (*tdot == '\n') { y++; x = -1; }
+	    else {
+		if (x==sw) { y++; x=0; }
+		if (*tdot == '\t')
+		    x = min(x + TABWID -(x & 7), sw)-1;
+		else if (*tdot < ' ' || *tdot == DEL) {
+		    x++;
+		    if (x==sw) { y++; x=0; } } }
+	    tdot++; x++; }
+	if (tdot==dot) { curx=x; cury=y; }
+	if (*(tdot-1) == '\n' && tdot < z) away=tdot-1;
+	else away=tdot;
+	if (dot > away
+	    || cury > wintop + (winbot-wintop)*gvars.bottom_display_margin/100
+	    || cury < wintop + (winbot-wintop)*gvars.top_display_margin/100) {
+		home = dot;
+		while (home > buf && *(home-1) != '\n') home--;
+		center();
+		upd2();
+	}
+}
+
+refline(y,invflg)
+int y;
+Bool invflg;
+{
+register char *pt1,*pt2,*pt3,*pt4;
+int len, len1, len2, i;
+	pt1 = screen[y]; pt2 = oldscreen[y];
+	pt1[screenwidth] = '\0';	/* In case line was too long */
+	len1 = strlen(pt1);
+	len2 = strlen(pt2);
+	while (*pt1 == *pt2 && *pt1 != '\0' && *pt2 != '\0') {
+		pt1++; pt2++; }
+	if (*pt2 != *pt1) {
+		if (*pt2 == '\0') while (*pt1 == ' ') pt1++;
+		cur(y, pt1 - screen[y]);
+		if (len1 == len2) {
+			pt3 = screen[y] + len1 - 1;
+			pt4 = oldscreen[y] + len1 - 1;
+			while (*pt3 == *pt4) { pt3--; pt4--; }
+			pt3++;
+			len = pt3 - pt1;
+		}
+		else len = len1 - (pt1 - screen[y]);
+		if (invflg) invmod(TRUE);
+		write(1,pt1,len);
+		if (invflg) invmod(FALSE);
+		hpos += len;
+		if (len1 < len2) {
+			if (CE != NIL) cleol(FALSE);
+			else for(i=1; i<=len2-len1;i++,hpos++) pchar(' ');
+		}
+		strcpy(oldscreen[y],screen[y]);
+	}
+}
+
+refresh(modeflg)
+int modeflg;
+{
+register int y;
+	if (!typeahead()) refline(cury,FALSE);
+	if (modeflg) refline(winbot+1,TRUE);
+	if (typeahead()) return;
+	if (modeflg) {
+ 		if (winbot < screenlen-3) refline(screenlen-2,TRUE);
+		else if (wintop > 0) refline(wintop-1,TRUE);
+	}
+	for (y=0; y < screenlen-2; y++) {
+		if (typeahead()) return;
+		if (y != cury) refline(y,FALSE);
+	}
+	if (!typeahead() && (cury != vpos || curx != hpos)) cur(cury,curx);
+}
+
+findxy()			/* Updates the values of */
+{				/* linpos, curx and cury */
+register char *t;
+register int i;
+int y=wintop;
+register int x=0;
+int sw=screenwidth-1;
+int tlinpos=0;
+	if (gaps < home + GAPDIST) closegap();
+	if (dot < home) {
+		home = dot;
+		while (home > buf && *(home-1) != '\n') home--;
+		center();
+	}
+	t=home;
+	while (y <= winbot && t < z) {
+	    if (t==dot) { curx=x; cury=y; linpos=tlinpos; return; }
+	    if (*t == '\n') { y++; x = -1; tlinpos = -1; }
+	    else {
+		if (x==sw) { y++; x=0; }
+		if (*t == '\t') {
+			i = min(x + TABWID -(x & 7), sw)-1;
+			tlinpos += i-x;
+			x = i;
+		}
+		else if (*t < ' ' || *t == DEL) {
+			x++;
+			tlinpos++;
+			if (x==sw) { y++; x=0; } } }
+	    t++;
+	    x++;
+	    tlinpos++;
+	}
+	if (t==dot) { curx=x; cury=y; linpos=tlinpos; return; }
+	home = dot;
+	while (home > buf && *(home-1) != '\n') home--;
+	center();
+	findxy();
+}
+
+int findcurx()
+{
+char *tdot;
+register int i,x,y;
+int sw = screenwidth-1;
+	tdot = dot;
+	while (tdot > buf && *(tdot-1) != '\n') tdot--;
+	x = 0;
+	y = wintop;
+	while (tdot < dot) {
+		if (x == sw) {
+			x = 0;
+			y++;
+		}
+		if (*tdot == '\t')
+			x = min(x + TABWID -(x & 7), sw) - 1;
+		else if (*tdot < ' ' || *tdot == DEL) {
+			x++;
+			if (x==sw) {
+				x = 0;
+				y++;
+			}
+		}
+		tdot++;
+		x++;
+	}
+	curx = x;
+	return y;
+}
+@//E*O*F screen.c//
+chmod u=rw,g=r,o= screen.c
+ 
+echo x - scame0.c
+sed 's/^@//' > "scame0.c" <<'@//E*O*F scame0.c//'
+/*	SCAME scame0.c				*/
+
+/*	Revision 1.0.0	1985-01-30		*/
+
+static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+
+# include "scame.h"
+# include <ctype.h>
+
+Bool insertc(c,i)
+char c;
+long i;
+{
+register char *p1, *p2;
+	killing=FALSE;
+	if ((gaps > dot + GAPDIST || (long) (gape-gaps) < i) &&
+		!gapto(dot + GAPDIST, GAPSIZE + i)) {
+		errmes(BF);
+		return (FALSE);
+ 	}
+	blockmove(dot, dot+i, (long)(gaps-dot));
+	if (gape == z) gape += i;
+	z += i;
+	gaps += i;
+	p1 = dot;
+	dot = p2 = dot+i;
+	while (p1 < p2) *p1++ = c;
+	updateflag = TRUE;
+	cb.modified = TRUE;
+	return (TRUE);
+}
+
+insertstr(str,l)
+char *str;
+long l;
+{
+register char *tdot;
+register int midwindow;
+	if (l == 0L) return;
+	midwindow = (winbot-wintop)/3;
+	tdot=dot;
+	if (insertc('\0',l)) {
+		while (tdot < dot) {
+			*(tdot++) = *str++;
+			if (*str == '\n' && (CS != NIL || DL != NIL) && cury >= winbot) {
+				if (dot==z && cury==winbot+1)
+					vtscroll(2*midwindow+1,wintop);
+				else if  (dot != z && cury == winbot)
+					vtscroll(2*midwindow,wintop);
+				cury = midwindow;
+			}
+		}
+		cb.modified = TRUE;
+	}
+}
+
+indent(i)
+long i;
+{
+char *tdot;
+	if (!xarg) switch (cb.majormode) {
+		case ADA:
+		case C:
+		case LISP:
+		case PASCAL:
+			tdot=dot;
+			passline(-1L);
+			backtoindent();
+			findxy();
+			i = curx+1;
+			xarg = TRUE;
+			dot = tdot;
+			findxy();
+	}
+	else i++;
+	if (xarg) {
+		if (i > 0) {
+			delhorizspace();
+			findxy();
+			if (curx < i) {
+				while (curx+1 < i && insertc('\t',1L))
+					findxy();
+				if (curx >= i) {
+					*(dot-1) = ' ';
+					findxy();
+					insertc(' ', i-curx-1);
+				}
+			}
+		}
+		else errmes(ILA);
+	}
+	else insertc('\t',1L);
+}
+
+indentregion(i)
+long i;
+{
+char *tdot, *ttdot;
+	tdot = min(dot, *mark);
+	adjustmark();
+	if (dot > *mark) exchgdotmark();
+	while (dot < *mark) {
+		backtoindent();
+		findxy();
+		xarg = TRUE;
+		ttdot = dot;
+		indent(curx + i);
+		*mark += dot-ttdot;
+		passline(1L);
+	}
+	*mark = tdot;
+}
+
+
+scroll(lines)
+long lines;
+{
+register int x;
+register int y=0;
+char *tdot0;
+register char *tdot;
+	closegap();
+	if (lines > 0){
+		while (lines-- > 0 && home<z) {
+			x=0;
+			while(home<z && *home++ != '\n' && x++< screenwidth-1);
+		}
+	}
+	else if (lines < 0) {
+		tdot = dot;
+		lines = -lines;
+		while (lines-- && home > buf) {
+			dot=home;
+			do {
+				home--;
+				x = 0;
+				while (home > buf && *(home-1) != '\n'
+				    && x++ < screenwidth)
+					home--;
+				findxy();
+			} while (cury == wintop && home > buf);
+			while (cury > wintop + 1) {
+				home++;
+				findxy();
+			}
+		}
+		dot = tdot;
+ 	}
+}
+
+center(i)
+int i;
+/* move line with cursor to be near center of window */
+{
+	home=dot;
+	findxy();
+	scroll((long)((wintop-winbot)*4/10));
+}
+
+newwindow(i)
+long i;
+/* Refresh window and let current line be line i if arg given */
+{
+int j, k;
+	if (xxarg) {
+		if (i < 0) i = winbot-wintop+1 + i;
+		if (i >= 0 && i < winbot-wintop+1 && wintop + i != cury) {
+			vtscroll((int)(cury - wintop-i),wintop);
+			scroll(cury-wintop-i);
+			upd2();
+			modeline();
+		}
+	}
+	else if (xarg) {
+		for (j=0; j<screenwidth; j++) oldscreen[cury][j] = 128;
+	}
+	else {
+		if (windows == 1) {
+			cls(); 
+			for (j=wintop; j<=winbot+1; j++) *oldscreen[j]='\0';
+		}
+		else for(j=wintop; j<=winbot+1; j++)
+			for  (k=0; k<screenwidth; k++) oldscreen[j][k]=128;
+		center();
+		modeline();
+	}
+}
+
+forwchar(i)
+register long i;
+{
+	if (dot + i > z) {
+		errmes(NIB);
+		i = z - dot;
+	}
+	if (dot + i >= gaps)
+		gapto(dot+i+GAPDIST, GAPSIZE);
+	dot += i;
+	killing=FALSE;
+}
+
+long backchar(i)
+register long i;
+{
+	if (dot - i < buf) {
+		errmes(NIB);
+		i = dot - buf;
+	}
+	dot -= i;
+	killing=FALSE;
+	return (i);
+}
+
+
+passline(i)
+register long i;
+{
+register char *tdot, *end;
+	tdot = dot;
+	if (i > 0) {
+		closegap();
+		end = z;
+		while (i-- > 0 && tdot < end)
+			while (tdot < end && *tdot++ != '\n');
+	}
+	else {
+		end = buf;
+		while (i++ < 0 && tdot > end) {
+			while (tdot > end && *--tdot != '\n');
+			if (*(tdot) != '\n')
+				while (tdot < z && *tdot != '\n') tdot++;
+		}
+	}
+	dot = tdot;
+	killing=FALSE;
+}
+
+downline(i)
+long i;
+{
+int y, wsize=(winbot-wintop);
+register int x;
+	findxy();
+	y = cury;
+	if (i==1
+	 && y >= wintop + wsize * gvars.bottom_display_margin / 100 && dot < z)
+		vtscroll((int)(wsize*(gvars.bottom_display_margin - 38)/100)+1, wintop);
+	passline(i);
+	findxy();
+	if (i==1 && cury==y && dot==z) insertc('\n',1L);
+	else {
+		x = curx-1;
+		while (++x < oldhpos && dot < z && *dot != '\n') {
+			if (*dot == '\t')
+				x = min(x + TABWID - (x&7), screenwidth - 1)-1;
+			else if (*dot < ' ' || *dot == DEL) x++;
+			dot++;
+		}
+ 	}
+	killing=FALSE;
+}
+
+upline(i)
+long i;
+{
+int y=cury;
+char *d=dot;
+register int x;
+	passline(-i);
+	if (d != dot) begofline();
+	findxy();
+	x = curx-1;
+	while (++x < oldhpos && dot < z && *dot != '\n') {
+		if (*dot == '\t')
+			x = min(x + TABWID - (x&7), screenwidth-1) - 1;
+		else if (*dot < ' ' || *dot == DEL) x++;
+		dot++;
+	}
+	if (i==1 && home>buf
+	    && y <= wintop + (winbot-wintop)*gvars.top_display_margin/100)
+ 		vtscroll((int)((wintop-winbot)*(40-gvars.top_display_margin)/100-1), wintop);
+	killing=FALSE;
+}
+
+endofline()
+{
+	closegap();
+	while (dot < z && *dot != '\n') dot++;
+	killing=FALSE;
+}
+
+
+begofline()
+{
+	while (dot > buf && *(dot-1) != '\n') dot--;
+	killing=FALSE;
+}
+
+backtoindent()
+{
+	closegap();
+	begofline();
+	while (dot < z && *dot != '\n' && isblank(*dot)) dot++;
+}
+
+delhorizspace()
+{
+char *tdot;
+	closegap();
+	while (dot>buf && isblank(*(dot-1))) dot--;
+	tdot = dot;
+	while (tdot < z && isblank(*tdot)) tdot++;
+	delchar((long)(tdot-dot));
+}
+
+delindent()
+{
+	if (xarg) passline(1L);
+	begofline();
+	delchar(backchar(1L));
+	delhorizspace();
+	insertc(' ',1L);
+}
+
+killchar(i)
+long i;
+{
+Bool killflag=killing;
+	if (dot + i >= gaps) closegap();
+	if (i < 0L) i = -backchar(-i);
+	else i = min(i, (long) (z - dot));
+	killing=killflag;
+	if (killing) {
+		if (i > 0) filncat(killbuffile, dot, i);
+		else filnprep(killbuffile,dot, -i);
+    	}
+    	else {
+		filncpy(killbuffile,dot, abs(i), 0600);
+		killing=TRUE;
+    	}
+    	delchar(abs(i));
+}
+
+
+delchar(i)
+long i;
+{
+int lin1,lin2,lines;
+long j;
+	if (i > 0L){
+		if (dot + i >= gaps) gapto(dot + i + GAPDIST, GAPSIZE);
+		if (dot+i <= z) {
+			upd2();
+			if ((CS != NIL || DL != NIL) && dot+i < away) {
+				findxy();
+				lin1 = cury;
+				for(j=0; j<i && *(dot+j)!='\n'; j++);
+				if (j==i && curx+i >= screenwidth) lin1++;
+				if (i==1 && *dot != '\n'
+				    && curx == screenwidth-1) lin1++;
+				dot += i;
+				findxy();
+				lin2 = cury;
+				dot -= i;
+				if (lin2 > lin1) {
+					lines = lin2-lin1;
+					if (*(dot-1)!='\n' || dot==buf
+					|| *(dot+i-1)!='\n' ) lin1++;
+					vtscroll(lines,lin1);
+				}
+			}
+			blockmove(dot+i, dot, (long)(gaps-dot-i));
+			if (gape == z) gape -= i;
+			z -= i;
+			gaps -= i;
+			updateflag = TRUE;
+			cb.modified = TRUE;
+		}
+		else errmes(NIB);
+	}
+}
+
+
+nextscreen()
+{
+	if (away < z) {
+		dot=away+1;
+		passline(-2L);
+		begofline();
+		home=dot;
+		upd2();
+	}
+}
+
+prevscreen()
+{
+	if (home > buf) {
+		passline((long)(-(winbot-wintop+1)+2-cury));
+		begofline();
+		home=dot;
+		upd2();
+	}
+}
+
+
+readfile()
+{
+int f;
+register char *tdot;
+off_t fz;
+	closegap();
+	if (*cb.filename == '\0') {
+		errmes(NSF);
+		return;
+	}
+	else if ((f = open(cb.filename,0)) > -1) {
+		fz = filesize(cb.filename);
+		if ((long)fz > bufsize && !incbuf((long)fz - bufsize))
+			errmes(FTB);
+		else {
+			z = buf + read(f, buf, (int) bufsize);
+			for (tdot = buf; tdot<z; tdot++) *tdot &= 127;
+			gotobegin();
+			cb.modified=FALSE;
+			cb.mtime = filemodified(cb.filename);
+ 		}
+		close(f);
+ 	}
+	else {
+		echo("(New File)");
+		z=buf; 
+		gotobegin(); 
+		cb.modified=FALSE;
+		cb.mtime = (time_t) 0;
+	}
+	updateflag = TRUE;
+	upd2();
+	modeline();
+	killing=FALSE;
+	gape = gaps = z;
+}
+
+insertfile(infilename)
+char *infilename;
+{
+int f;
+register char *tdot;
+off_t fz;
+	closegap();
+		if ((f = open(infilename,0)) > -1) {
+			fz = filesize(infilename);
+			if (fz == 0) echo("File is empty");
+			else if ((long)(z - buf + fz) <= bufsize
+			  || incbuf((long)(z - buf + fz - bufsize))) {
+			  	pushpopmark(1L);
+				insertc('\0', (long) fz);
+				read(f,dot - fz, (int) fz);
+				for (tdot = dot - fz ; tdot < dot;
+					tdot++) *tdot &= 127;
+				cb.modified=TRUE;
+			}
+			else errmes(FTB);
+			close(f);
+		}
+		else if (*infilename != '\0') errmes(NSF);
+		killing=FALSE;
+}
+
+
+writefile()
+{
+register int f;
+char bakfil[FILENAMESIZE], *cp, *tdot;
+struct stat fst;
+unsigned mode;
+	closegap();
+	if (cb.majormode == PASCAL && *(z-1) == '.') {
+		tdot = dot;
+		gotoend();
+		insertc('\n',1L);
+		dot = tdot;
+	}
+	if (*cb.filename != '\0') {
+		echo("Written: "); 
+/*
+		strncpy(bakfil,(cp= rindex(cb.filename,'/')) == 0?
+			cb.filename: &cp[1],10);
+		bakfil[10]='\0';
+		strcat(bakfil,".BAK");
+*/
+		cp= rindex(cb.filename,'/');
+		if (cp == NIL)
+			cp = cb.filename;
+		else
+			cp++;
+		sprintf(bakfil, BACKUPNAME, cp);
+
+/* Now what if the file is a link??? (FIX THIS) */
+
+		unlink(bakfil);
+		if (rename(cb.filename,bakfil) == 0) {
+			stat(bakfil,&fst);
+			mode = fst.st_mode;
+		}
+		else mode = 0666;
+		if ((f=creat(cb.filename,(int) mode))>=0) {
+			if (write(f,buf,z-buf) == z-buf) {
+				strout(cb.filename);
+				cb.modified = FALSE;
+				modeline();
+				close(f);
+				cb.mtime = filemodified(cb.filename);
+			}
+			else {
+				pchar(BELL);
+				echo("can't write file");
+				close(f);
+			}
+		}
+		else {
+			pchar(BELL);
+			echo("can't create file!");
+		}
+	}
+	else {
+		pchar(BELL);
+		echo("No saved filename");
+	}
+	killing=FALSE;
+}
+
+
+killline(i)
+long i;
+{
+Bool killflag=killing;
+Bool blankline=TRUE;
+
+	pushpopmark(1L);
+	if (xarg || *dot == '\n') passline(i); 
+	else {
+		while (dot < z && *dot != '\n') {
+			if (!isblank(*dot)) blankline = FALSE;
+			dot++;
+		}
+		if (blankline) passline(1L);
+	}
+	exchgdotmark();
+	killing=killflag;
+	killregion();
+}
+
+killregion()
+{
+long int n;
+	adjustmark();
+	n = *mark-dot;
+	if (dot != *mark) killchar(n);
+	*mark=dot;
+}
+
+copyregion()
+{
+long howmany;
+char *from= dot;
+	adjustmark();
+	howmany= *mark - dot;
+	if (howmany < 0) { howmany = -howmany; from = *mark; }
+	if (dot != *mark) {
+		closegap();
+		if (killing) filncat(killbuffile, from, howmany);
+		else {
+			filncpy(killbuffile, from, howmany, 0600);
+			killing=TRUE;
+		}
+	}
+}
+
+
+gotobegin()
+{
+	dot=home=buf;
+	cury=curx=0;
+	killing=FALSE;
+}
+
+gotoend()
+{
+	closegap();
+	dot=z;
+	killing=FALSE;
+}
+
+
+tmodlin(text)
+char *text;
+{
+	if (text == NIL)
+		*tmpmode_string = '\0';
+	else
+		strcpy(tmpmode_string, text);
+	modeline();
+	refresh(TRUE);
+}
+
+modeline()
+{
+register char *pt;
+char tstr[10];
+register int i;
+		pt = screen[winbot+1];
+		*pt = '\0';
+		for (i = recursive_level - 1; i > 0; i--)
+			strcat(pt, "[");
+		if (*tmpmode_string)
+			strcat(pt, tmpmode_string);
+		else {
+			strcat(pt,"SCAME (");
+			strcat(pt,modes[(int)cb.majormode]);
+			if (cb.minormodes.autofill) strcat(pt, " Fill");
+			if (cb.minormodes.overwrite) strcat(pt, " Ovwrt");
+			if (defining_kbd_mac) strcat(pt, " DEF");
+			strcat(pt,")  ");
+			strcat(pt,cb.name);	/* FLAG CONTROL! */
+			strcat(pt,":  ");
+			if (strsub(cb.filename,currentdir,FALSE,FALSE) == 0) {
+				int i = 0;
+				while (*(cb.filename+i) == *(currentdir+i))
+					i++;
+				strcat(pt,cb.filename+i+(i>1));
+			}
+			else strcat(pt,cb.filename);	/* FLAG CONTROL! */
+		}
+		strcat(pt,"          ");
+		/* truncate line if too long */
+		pt[screenwidth-9-recursive_level] = '\0';
+		if (home==buf) { if (away<z) strcat(pt,"--TOP--"); }
+		else if (away==z) strcat(pt,"--BOT--");
+		else {
+			sprintf(tstr,"--%ld%%--",
+				(unsigned) (home-buf)*100L/(unsigned)(z-buf));
+			strcat(pt,tstr);
+		}
+		strcat(pt, "  ");
+		if (cb.modified) pt[strlen(pt)-1] = '*';
+		for (i = recursive_level - 1; i > 0; i--)
+			strcat(pt, "]");
+		fflush(stdout);
+}
+
+transchar()
+{
+char c;
+	if (*(dot-1) != '\n') {
+		if (*dot == '\n' || dot == z) backchar(1L);
+		c = *dot;
+		*dot = *(dot-1);
+		backchar(1L);
+		*dot = c;
+		forwchar(2L);
+		updateflag = TRUE;
+		cb.modified = TRUE;
+	}
+	else pchar(BELL);
+	killing=FALSE;
+}
+
+
+yank()
+{
+int f;
+register char *tdot;
+off_t fz;
+	fz = filesize(killbuffile);
+	if (fz && (f = open(killbuffile,0)) > -1) {
+		if ((long)(z - buf + fz) <= bufsize
+		    || incbuf((long)(z - buf + fz - bufsize))) {
+			pushpopmark(1L);
+			insertc('\0', (long) fz);
+			read(f,dot - fz, (int) fz);
+			for (tdot = dot - fz ; tdot < dot;
+				tdot++) *tdot &= 127;
+			cb.modified=TRUE;
+		}
+		else errmes(BF);
+		close(f);
+	}
+	else pchar(BELL);
+	killing=FALSE;
+}
+
+Bool getfilename(prompt, name)
+char *prompt, *name;
+{
+char tfilename[FILENAMESIZE];
+int c;
+char tprompt[80];
+	basename(name,tfilename,FALSE);
+	strcpy(tprompt,prompt);
+	if (*tfilename != '\0') 
+		sprintf(&tprompt[strlen(tprompt)]," (%s)",tfilename);
+	strcat(tprompt,": ");
+	*tfilename= '\0';
+	do {
+		c=instring(tprompt,tfilename,strlen(tfilename),
+				" \023\t", "\r\007\033");
+		if (c == ESC) {
+			if (*tfilename == '\0') {
+				basename(name,tfilename,FALSE);
+			}
+			else pchar(BELL);
+		}
+	} while (c == ESC);
+	if (c==13) {
+ 		if (*tfilename == '\0') basename(name, tfilename, FALSE);
+		if (strcmp(name,tfilename)!=0) buildfilename(name,tfilename);
+		return TRUE;
+	}
+	else {
+		echo(NIL);
+		return FALSE;
+	}
+}
+
+adjustmark()
+{
+*mark = min(*mark,z);
+}
+
+exchgdotmark()
+{
+char *tdot=dot;
+	adjustmark();
+	if (dot < *mark)
+		forwchar((long)(*mark - dot));
+	else
+		backchar((long)(dot - *mark));
+	*mark = tdot;
+}
+
+
+markquant(q, i, movepoint)
+enum quantity_t q;
+long i;
+Bool movepoint;
+{
+char *tdot;
+	tdot = dot;
+	forwquant(q, i);
+	pushpopmark(1L);
+	dot = tdot;
+	if (movepoint && !endofquantp(q, dot))
+		backquant(q, 1L);
+}
+
+killquant(q,i)
+enum quantity_t q;
+long i;
+{
+Bool killflag=killing;
+	pushpopmark(1L);
+	if (i>0)
+		forwquant(q,i);
+	else
+		backquant(q,-i);
+	exchgdotmark();
+	killing=killflag;
+	killregion();
+}
+
+forwquant(q,i)
+enum quantity_t q;
+register long i;
+{
+	closegap();
+	while (i-- > 0) {
+		switch (q) {
+		case WORD:
+ 			while (dot < z && endofquantp(q,dot)) dot++;
+			while (dot < z && !endofquantp(q,dot)) dot++;
+			break;
+		case LINE:
+			passline(i);
+			break;
+		case SENTENCE:
+			if (dot < z-1) dot++;
+			while (dot < z && *dot == '\n') dot++;
+			while ((dot < z-1)
+				&& (index(".?!", *(dot-1)) == NIL
+				   || (*dot != ' ' || *(dot+1) != ' '))
+				&& (index(".?!", *(dot-1)) == NIL
+				   || (*dot != '\n'))
+				&& (*dot != '\n' || *(dot+1) != '\n'))
+				dot++;
+			break;
+		case REGION:
+		case PARAGRAPH:
+			errmes(ILQ);
+			break;
+		case BUFFER:
+			gotoend();
+			break;
+		}
+	}
+	killing=FALSE;
+}
+
+backquant(q,i)
+enum quantity_t q;
+register long i;
+{
+	while (i-- > 0 && dot > buf) {
+		switch (q) {
+		case WORD:
+ 			backchar(1L);
+			while (endofquantp(q,dot) && backchar(1L)!=0L);
+			while (!endofquantp(q,dot) && backchar(1L)!=0L);
+			if (dot>buf && dot < z) dot++;
+			break;
+		case LINE:
+			passline(-i);
+			break;
+		case SENTENCE:
+			if (dot > buf) backchar(1L);
+			while (dot > buf && (*dot == '\n' || isblank(*dot)))
+ 			       	backchar(1L);
+			while ((dot > buf)
+				&& (index(".?!", *(dot-1)) == NIL
+				   || (*dot != ' ' || *(dot+1) != ' '))
+				&& (index(".?!", *(dot-1)) == NIL
+				   || (*dot != '\n'))
+				&& (*dot != '\n' || *(dot+1) != '\n'))
+				backchar(1L);
+			while(dot < z && (*dot == '\n' || isblank(*dot)))
+				dot++;
+			break;
+		case REGION:
+		case PARAGRAPH:
+			errmes(ILQ);
+			break;
+		case BUFFER:
+			gotobegin();
+			break;
+		}
+	}
+	killing=FALSE;
+}
+
+
+upcaseword(i,flg)
+register long i;
+short flg;
+{
+register Bool swedish = (cb.majormode==SWEDISH);
+	closegap();
+	while (i-- > 0) {
+		while (dot < z && endofquantp(WORD,dot)) dot++;
+		if (dot<z && flg == 2) {
+			*dot=upcase(*dot,swedish);
+			dot++;
+			flg=FALSE;
+		}
+		if (flg) {
+			while (dot < z && !endofquantp(WORD,dot)) {
+				*dot=upcase(*dot,swedish);
+				dot++;
+			}
+		}
+		else {
+			while (dot < z && !endofquantp(WORD,dot)) {
+				*dot=lowcase(*dot,swedish);
+				dot++;
+			}
+		}
+	}
+	updateflag = TRUE;
+	cb.modified = TRUE;
+	killing=FALSE;
+}
+
+upcaseregion(f)
+Bool f;
+{
+register char *d1,*d2;
+register Bool swedish=(cb.majormode==SWEDISH);
+	adjustmark();
+	d1 = min(dot,*mark)-1;
+	d2 = max(dot,*mark);
+	if (f) {
+		while (++d1 < d2) *d1=upcase(*d1,swedish);
+	}
+	else {
+		while (++d1 < d2) *d1=lowcase(*d1,swedish);
+	}
+	updateflag = TRUE;
+	cb.modified = TRUE;
+	killing=FALSE;
+}
+
+rot13_region()
+{
+register char *d1,*d2;
+	adjustmark();
+	d1 = min(dot,*mark)-1;
+	d2 = max(dot,*mark);
+	if (d1 < d2-1) {
+		while (++d1 < d2) {
+			if (isalpha(*d1)) {
+				if ((*d1 & 31) <= 13) *d1 = *d1+13;
+				else *d1 = *d1-13;
+			}
+		}
+		updateflag = TRUE;
+		cb.modified = TRUE;
+	}
+	killing=FALSE;
+}
+
+
+stop()
+{
+#ifdef SIGTSTP
+register int i;
+	signal(SIGHUP, SIG_DFL);
+	signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
+	signal(SIGTSTP, SIG_DFL);
+	setupterm(FALSE);
+	echo(NIL);
+	kill(getpid(), SIGTSTP);	/* stop here until continued */
+	setupterm(TRUE);
+	cls();
+	vpos=0; hpos=0;
+	upd2();
+	modeline();
+	for (i=0; i<=screenlen-2; i++) *oldscreen[i]='\0';
+	signal(SIGTSTP, stop);
+#else
+	errmes(NYI);
+#endif
+	killing=FALSE;
+}
+
+findmode()
+{
+char *str;
+	str=rindex(cb.filename,'.');
+	if (str != NIL) {
+		if (!strcmp(str,".A")) setmode(ADA);
+		else if (!strcmp(str,".c")) setmode(C);
+		else if (!strcmp(str,".l") || !strcmp(str,".lsp")
+			|| !strcmp(str,".lisp")) setmode(LISP);
+		else if (!strcmp(str,".p") || !strcmp(str,".pas"))
+			setmode(PASCAL);
+		else if (!strcmp(str,".swe")) setmode(SWEDISH);
+		else setmode(FUNDAMENTAL);
+	}
+	else setmode(FUNDAMENTAL);
+}
+
+setmode(mode)
+enum majormode_t mode;
+{
+static int haspiped=FALSE;
+register int i;
+register swedish = (mode == SWEDISH);
+char initfile[FILENAMESIZE];
+	if (mode != cb.majormode) {
+		switch (mode) {
+		    case LISP:
+			cb.lvars.disp_matching_paren = 1L; break;
+		    default:
+			cb.lvars.disp_matching_paren = -1L;
+		}
+		if (mode == SWEDISH)
+		for (i=0; i < 512; i++) {
+			nupcasarr[i] = ((i & 0177) >= 'a'
+					&& (i & 0177) <= '}') ? (i & 0337) : i;
+#ifdef COMMENT
+			nlocasarr[i] = ((i & 0177) >= 'A'
+					&& (i & 0177) <= ']') ? (i | 0040) : i;
+#endif
+		}
+		strcpy(initfile,".scamerc_");
+		strcat(initfile,modes[(int)mode]);
+		for (i=0; i < strlen(initfile); i++)
+			initfile[i] = lowcase(initfile[i],FALSE);
+		execfile(initfile);
+	}
+	cb.majormode = mode;
+	modeline();
+}
+
+setminormode(mode,arg)
+long *mode;
+long arg;
+{
+	if (xarg) *mode = arg;
+	else *mode = (long) !(*mode);
+	modeline();
+}
+
+whatcursorposition()
+{
+char s[SCRDIMX+1];
+long l;
+	l = (z != buf) ? (unsigned)(dot-buf)*100L/(unsigned)(z-buf) : 0L;
+	sprintf(s, "X=%d Y=%d ",curx,cury);
+	if (dot < z)
+		sprintf(&s[strlen(s)], "CH=%o ",*dot);
+	sprintf(&s[strlen(s)], ".=%u(%ld%% of %u) Allocated=%ld",
+			       dot-buf, l,   z-buf,       bufsize);
+	echo(s);
+}
+
+
+comment()
+{
+	closegap();
+	switch (cb.majormode) {
+	    case FUNDAMENTAL:
+	    case LISP:
+	    case SWEDISH:
+		begofline();
+		while (dot < z && *dot != ';' && *dot != '\n') dot++;
+		findxy();
+		while (curx > gvars.commcol+4 && isblank(*(dot-1))) {
+			delchar(backchar(1L));
+			findxy();
+		}
+		while (curx < gvars.commcol-1 && insertc('\t',1L)) findxy();
+		if (*(dot-1) != '\t') insertc('\t',1L);
+		if (dot==z || *dot != ';') insertc(';',1L);
+		else if (dot<z) dot++;
+		break;
+	    case PASCAL:
+		begofline();
+		while (((dot < z && *dot != '(') 
+			|| (dot< z-1 && *(dot+1) != '*'))
+			&& *dot != '\n') dot++;
+		findxy();
+		while (curx > gvars.commcol+4 && isblank(*(dot-1))) {
+			delchar(backchar(1L));
+			findxy();
+		}
+		while (curx < gvars.commcol-1 && insertc('\t',1L)) findxy();
+		if (*(dot-1) != '\t') insertc('\t',1L);
+		if (dot==z || *dot != '(') {
+			insertstr("(*  *)",6L);
+			backchar(3L);
+		}
+		else forwchar(3L);
+		break;
+	    case ADA:
+		begofline();
+		while (((dot < z && *dot != '-') 
+			|| (dot< z-1 && *(dot+1) != '-'))
+			&& *dot != '\n') dot++;
+		findxy();
+		while (curx > gvars.commcol+4 && isblank(*(dot-1))) {
+			delchar(backchar(1L));
+			findxy();
+		}
+		while (curx < gvars.commcol-1 && insertc('\t',1L)) findxy();
+		if (*(dot-1) != '\t') insertc('\t',1L);
+		if (dot==z || *dot != '-') insertstr("-- ",3L);
+		else forwchar(3L);
+		break;
+	    case C:
+		begofline();
+		while (((dot < z && *dot != '/') 
+			|| (dot< z-1 && *(dot+1) != '*'))
+			&& *dot != '\n') dot++;
+		findxy();
+		while (curx > gvars.commcol+4 && isblank(*(dot-1))) {
+			delchar(backchar(1L));
+			findxy();
+		}
+		while (curx < gvars.commcol-1 && insertc('\t',1L)) findxy();
+		if (*(dot-1) != '\t') insertc('\t',1L);
+		if (dot==z || *dot != '/') {
+			insertstr("/*  */",6L);
+			backchar(3L);
+		}
+		else forwchar(3L);
+		break;
+	} /* switch */
+}
+
+
+pushpopmark(a)
+long a;
+{
+register int i;
+char *tdot;
+	if (a == 1) {
+		for (i=15; i > 0; i--) mark[i] = mark[i-1];
+		*mark=dot;
+	}
+	else {
+		closegap();
+		tdot= min(*mark,z);
+		for (i=0; i < 15 && mark[i+1] != NIL; i++) mark[i]= mark[i+1];
+		mark[i] = dot;
+		dot = tdot;
+	}
+}
+
+
+
+int tablk(table,str,index)
+struct tabstruct table[];
+char *str;
+int index;
+
+/* Look through table for str.
+ * If one match is found, return index of that.
+ * If more than one, return -(no of matching entries).
+ * If none, return -1
+ *
+ * Also, fill in as much as is unique in str.
+ *
+ */
+
+{
+register int i, count = 0;
+char mstr[80];
+	*mstr = '\0';
+	for (i = index; table[i].name != NIL; i++)
+		if (strsub(table[i].name,str,TRUE,FALSE) == 0) {
+			count++;
+			index = i;
+			if (*mstr == '\0') strcpy(mstr,table[i].name);
+			else while(strsub(table[i].name,mstr,TRUE,FALSE) != 0)
+				mstr[strlen(mstr)-1] = '\0';
+			if (count==1 && strneq(table[i].name,str,strlen(mstr),TRUE))
+				break;
+		}
+	if (count == 0) return(-1);
+	else {
+		if (*mstr != '\0') strcpy(str,mstr);
+		if (count == 1) return(index);
+		else return(-count);
+	}
+}
+
+listmatching(table,str)
+struct tabstruct table[];
+char *str;
+{
+register int i = -1;
+	typing = FALSE;
+	typeout("Here are the possible completions of what you have typed:");
+	while (table[++i].name != NIL)
+		if (strsub(table[i].name,str,TRUE,FALSE) == 0
+			&& !typeout(table[i].name)) break;
+}
+
+Bool incbuf(i)
+long i;
+{
+long j;
+char *p;
+	if (i > 0) {
+		p = sbrk((int) i);
+		if ((int) p != -1) {
+			j = sbrk(0) - p;
+			bufsize += j;
+			if (j >= i) return(TRUE);
+		}
+	}
+	errmes(BF);
+	return (FALSE);
+}
+
+setfillprefix()
+{
+char *tdot= dot;
+	begofline();
+	strncpy(fillprefix,dot,tdot-dot);
+	fillprefix[tdot-dot] = '\0';
+	dot = tdot;
+	if (!quiet) {
+		echo("Fill Prefix now \"");
+		write(1, fillprefix, strlen(fillprefix));
+		pchar('"');
+	}
+}
+
+
+
+
+
+/*
+ * Gap routines. gaps points to first position in gap.
+ * gape points to first character after gap. If gaps=gape
+ * then gap is empty
+ */
+
+Bool gapto(pos,size)
+char *pos;
+long size;
+{
+long stepsize;
+#ifdef PDP11
+	stepsize = 64;
+#else
+	stepsize = 1024;
+#endif
+	closegap();
+	pos = min(z, pos);
+	if ((z + size <= buf + bufsize)
+	    || incbuf(size + stepsize - ((long)sbrk(0) + size) % stepsize)) {
+		gaps = pos;
+		gape = pos+size;
+		blockmove(gaps, gape, (long)(z-gaps));
+		return (TRUE);
+	}
+	else return(FALSE);
+}
+
+closegap()
+{
+	if (gaps < z)
+		blockmove(gape, gaps,(long)(z-gaps));
+	gape = gaps = z;
+}
+
+char *func_name(fn, fname)	/* Get the printname for a function,	*/
+int (*fn)();			/* given a pointer to it.		*/
+char *fname;
+{
+register int i = 0;
+	while(x_comtab[i].name != NIL && x_comtab[i].funcp != fn) i++;
+	if (x_comtab[i].funcp == fn) strcpy(fname, x_comtab[i].name);
+	else *fname = '\0';
+	return(fname);
+}
+
+revertfile()
+{
+char *tdot,*thome;
+	tdot=dot;
+	thome = home;
+	readfile();
+	dot = min(tdot,z);
+	if (thome <= z) home = thome;
+}
+@//E*O*F scame0.c//
+chmod u=rw,g=,o= scame0.c
+ 
+echo x - scame1.c
+sed 's/^@//' > "scame1.c" <<'@//E*O*F scame1.c//'
+/*	SCAME scame1.c				*/
+
+/*	Revision 1.0.0  1985-02-09		*/
+
+static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+
+# include "scame.h"
+
+extern int k_ubk();
+
+
+
+/* clearecho makes the echo line disappear after a while */
+
+clearecho()
+{
+	sleep(1);
+	echo(NIL);
+}
+
+/* select buffer */
+
+selectbuffer()
+{
+char c;
+char bufname[80];
+char tprompt[80];
+	strcpy(tprompt,"Select Buffer");
+	if (oldbuf >=0)
+		sprintf(&tprompt[strlen(tprompt)]," (%s)",buftab[oldbuf].name);
+	strcat(tprompt,": ");
+	c = instring(tprompt,bufname,0," \t\033","\007\r");
+	if (c == '\r' && (*bufname != '\0' || oldbuf >= 0)) {
+		bufname[BUFNAMESIZE-1] = '\0';
+		fixbuftab(PUT);
+		if (*bufname == '\0') getbuffer(buftab[oldbuf].name);
+		else getbuffer(bufname);
+	}
+	killing = FALSE;
+}
+
+Bool getbuffer(name)
+char *name;
+{
+int i=0;
+	while (i<noofbufs && !strneq(name,buftab[i].name,strlen(name)+1,TRUE))
+ 		i++;
+	if (i != bufno && i < MAXBUFS) {
+		if (wtmp(bufno)) {
+			oldbuf = bufno;
+			bufno = i;
+			if (i < noofbufs && rtmp(bufno)) /* old buffer */
+				fixbuftab(GET);
+			else {				/* new buffer */
+				if (i == noofbufs) noofbufs++;
+				strcpy(cb.name,name);
+				gotobegin();
+				z = buf;
+				cb.modified = FALSE;
+				*cb.filename = '\0';
+				cb.mtime = (time_t) 0;
+				setmode(FUNDAMENTAL);
+				cb.minormodes.autofill = 0L;
+				cb.minormodes.overwrite = 0L;
+				updateflag = TRUE;
+			}
+		}
+	}
+	else if (i >= MAXBUFS) { errmes(BTF); return(FALSE); }
+	return (TRUE);
+}
+
+
+/* kill buffer */
+
+kbuffer()
+{
+char c;
+char bufname[80];
+char tprompt[80];
+	if (noofbufs == 1) {
+		echo("Must have at least one buffer!");
+		pchar(BELL);
+		return;
+	}
+	sprintf(tprompt,"Kill Buffer (%s): ",cb.name);
+	c = instring(tprompt,bufname,0," \t\033","\007\r");
+	if (c == '\r') {
+		bufname[BUFNAMESIZE-1] = '\0';
+		fixbuftab(PUT);
+		if (*bufname == '\0') removebuffer(cb.name);
+		else removebuffer(bufname);
+	}
+}
+
+removebuffer(name)
+char *name;
+{
+int tmplen, i=0;
+char tf1[FILENAMESIZE],tf2[FILENAMESIZE];
+Bool select;
+	select = FALSE;
+	fixbuftab(PUT);
+	wtmp(bufno);
+	while (i<noofbufs && !strneq(name,buftab[i].name,strlen(name)+1,TRUE))
+ 		i++;
+	if (i < noofbufs) {
+		if (bufno == i) select = TRUE;
+		else if (bufno > i) bufno--;
+		if (windows == 2) {
+			if (otherbuf == i) onewindow();
+			else if (otherbuf > i) otherbuf--;
+		}
+		if (oldbuf == i) oldbuf = -1;
+		else if (oldbuf > i) oldbuf--;
+
+		/* and kill it */
+		sprintf(tf1,tempfile,ppid,uid);
+		sprintf(tf2,tempfile,ppid,uid);
+		tmplen = strlen(tf1);
+		while(i < noofbufs-1) {
+			buftab[i] = buftab[i+1];
+			sprintf(&tf1[tmplen],"%d",i);
+			sprintf(&tf2[tmplen],"%d",i+1);
+			if (rename(tf2,tf1) != 0)
+				printf("Cannot rename %s to %s\r\n",tf2,tf1);
+			i++;
+		}
+		noofbufs--;
+		if (select) {
+			if (oldbuf == -1) oldbuf = 0;
+			bufno = oldbuf;
+			rtmp(bufno);
+			fixbuftab(GET);
+			selectbuffer();
+		}
+	}
+	else errmes(NSB);
+}
+
+
+
+/* List Buffers */
+listbuffers()
+{
+int i,j;
+char s[150];
+	fixbuftab(PUT);
+	typing = FALSE;
+	typeout("    Buffer  (mode)                 Filename");
+	typeout(NIL);
+	for (i=0; i < noofbufs; i++) {
+		s[0] = '\0';
+		if (buftab[i].modified) strcat(s,"* ");
+		else strcat(s,"  ");
+		if (i == bufno) strcat(s,"- ");
+		else strcat(s,"  ");
+		strcat(s,buftab[i].name);
+		strcat(s,":   (");
+		strcat(s,modes[(int)(buftab[i].majormode)]);
+		strcat(s,")");
+		for (j = strlen(s); j < 35; j++) strcat(s," ");
+		strcat(s,buftab[i].filename);
+		s[79] = '\0';	/* trim if too long */
+		if (!typeout(s)) break;
+	}
+}
+
+
+/* wtmp(), rtmp(), fixbuftab() support for temporary files */
+
+Bool wtmp(i)
+int i;
+{
+int f;
+char s[FILENAMESIZE];
+Bool flg;
+	flg=FALSE;
+	sprintf(s, tempfile, ppid, uid);
+	sprintf(&s[strlen(s)], "%d", i);
+	if ((f=creat(s, 0600)) >= 0) {
+		closegap();
+		if (write(f,buf,z-buf) == z-buf) flg = TRUE;
+		else echo("can't write tempfile");
+		close(f);
+	}
+	else echo("can't create tempfile!");
+	return(flg);
+}
+
+Bool rtmp(i)
+int i;
+{
+int f;
+char s[FILENAMESIZE];
+	sprintf(s, tempfile, ppid, uid);
+	sprintf(&s[strlen(s)], "%d", i);
+	if ((f = open(s,0)) > -1) {
+		z = buf + read(f, buf, (int) bufsize);
+		close(f);
+		dot = min(dot, z);
+		updateflag = TRUE;
+		return(TRUE);
+ 	}
+	else {
+		echo("can't read tempfile");
+		return (FALSE);
+	}
+}
+
+fixbuftab(flg)
+int flg;
+{
+	switch(flg) {
+		case (PUT):
+			buftab[bufno] = cb;
+			buftab[bufno].dot = dot - buf;
+			buftab[bufno].home = home - buf;
+			break;
+		case (GET):
+			cb = buftab[bufno];
+			dot = buf + buftab[bufno].dot;
+			home = buf + buftab[bufno].home;
+			modeline();
+	}
+}
+
+
+/* exec() - does a nice system() */
+
+exec(s)
+char *s;
+{
+int c,i;
+	signal(SIGHUP, SIG_DFL);
+	signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
+	setupterm(FALSE);
+	cur(screenlen-1, 0);
+	write(1,"\n",1);
+	system(s);
+	write(1, more, strlen(more));
+	setupterm(TRUE);
+	*commandprompt = '\0';
+	if ((c= inchar(TRUE)) != ' ')
+		unget(c);
+	cls();
+	for (i=0; i<=screenlen-2; i++) *oldscreen[i]= '\0';
+	echo(NIL);
+}
+
+
+/* Tabify - turn spaces into tabs if possible */
+tabify()
+{
+register char *tdot;
+int q2,q3,q4;
+	while (dot < z) {
+		dot--;
+		while (++dot < z
+			&& (*dot != ' ' || *(dot+1) != ' ' || *(dot+2)!=' '));
+		if (dot < z) {
+			tdot=dot;
+			while (++dot < z && *dot == ' ');
+			findxy();
+			q3 = (curx) % TABWID;
+			backchar((long)q3);
+			q2 = dot - tdot;
+			if (q2 > 1) {
+				q4 = (TABWID - 1 + q2) / TABWID;
+				delchar(backchar((long)(q2 - q4)));
+				backchar((long)q4);
+				while (q4--) *dot++ = '\t'; }
+			while(q3--) dot++; } }
+}
+
+
+/* Saving and restarting SCAME */
+
+Bool restart()
+{
+int f;
+char s[FILENAMESIZE];
+long od;			/* same as otherdot */
+long tz;			/* same as bufsize */
+	sprintf(s, tempfile, ppid, uid);
+	strcat(s, "d");
+	if ((f = open(s,0)) > -1) {
+		echo("(Continuing)");
+		read(f, (char *) &noofbufs, sizeof(noofbufs));
+		read(f, (char *) &bufno, sizeof(bufno));
+		read(f, (char *) &oldbuf, sizeof(oldbuf));
+		read(f, (char *) &tz, sizeof(tz));
+		if (tz) incbuf(tz);
+		read(f, (char *) mark, 16 * sizeof(char *));
+		read(f, (char *) &od, sizeof(od));
+		otherdot=buf+od;
+		read(f, (char *) &windows, sizeof(windows));
+		read(f, (char *) &otherbuf, sizeof(otherbuf));
+		read(f, (char *) &wintop, sizeof(wintop));
+		read(f, (char *) &winbot, sizeof(winbot));
+		if (wintop != 0) winbot = screenlen-3;
+		read(f, (char *) &quiet, sizeof(quiet));
+		read(f, (char *) &execfd, sizeof(execfd));
+		read(f, oldsstr, 80);
+		read(f, fillprefix, 80);
+		read(f, tmpmode_string, 80);
+		read(f, (char *) &gvars, sizeof(struct gvarstruct));
+		read(f, lastinput, LASTINPUTSIZE);
+		read(f, (char *) &lstindex, sizeof(lstindex));
+		read(f, oldshellcommand, 80);
+		read(f, oldmailname, 80);
+		read(f, (char *) disptab, sizeof(disptab));
+		read(f, (char *) c_x_disptab, sizeof(c_x_disptab));
+		read(f, (char *) m_o_disptab, sizeof(m_o_disptab));
+		read(f, (char *) buftab, noofbufs * sizeof(struct bufstruct));
+		if (rtmp(bufno)) fixbuftab(GET);
+		modeline();
+		close(f);
+		clearecho();
+		return(TRUE);
+	}
+	else return(FALSE);
+}
+
+savescame()
+{
+int f;
+funcp fp;
+long od;
+char s[FILENAMESIZE];
+Bool flg;
+	*s='\0';
+	sprintf(s, tempfile,ppid, uid);
+	strcat(s, "d");
+	if (wtmp(bufno)) {
+		fixbuftab(PUT);
+		flg = FALSE;
+		if ((f=creat(s, 0600)) >= 0) {
+			write(f, (char *) &noofbufs, sizeof(noofbufs));
+			write(f, (char *) &bufno, sizeof(bufno));
+			write(f, (char *) &oldbuf, sizeof(oldbuf));
+			write(f, (char *) &bufsize, sizeof(bufsize));
+			write(f, (char *) mark, 16 * sizeof(char *));
+			od = otherdot - buf;
+			write(f, (char *) &od, sizeof(od));
+			write(f, (char *) &windows, sizeof(windows));
+			write(f, (char *) &otherbuf, sizeof(otherbuf));
+			write(f, (char *) &wintop, sizeof(wintop));
+			write(f, (char *) &winbot, sizeof(winbot));
+			write(f, (char *) &quiet, sizeof(quiet));
+			write(f, (char *) &execfd, sizeof(execfd));
+			write(f, oldsstr, 80);
+			write(f, fillprefix, 80);
+			write(f, tmpmode_string, 80);
+			write(f, (char *) &gvars, sizeof(struct gvarstruct));
+
+			write(f, lastinput, LASTINPUTSIZE);
+			write(f, (char *) &lstindex, sizeof(lstindex));
+			write(f, oldshellcommand, 80);
+			write(f, oldmailname, 80);
+			write(f, (char *) disptab, sizeof(disptab));
+			write(f, (char *) c_x_disptab, sizeof(c_x_disptab));
+			write(f, (char *) m_o_disptab, sizeof(m_o_disptab));
+			write(f, (char *) buftab,
+				noofbufs * sizeof(struct bufstruct));
+			close(f);
+			flg = TRUE;
+		}
+		else  echo("can't create tempfile!");
+		return(flg);
+	}
+	return(FALSE);
+}
+
+
+vfile(dir,file, modflg,waitflg,grepstring)
+char *dir, *file;
+Bool modflg, waitflg;
+char *grepstring;
+{
+int f;
+char tline[81];
+char mline[80];
+char tfile[80];
+char *cp;
+int c;
+int line;
+Bool eof;
+	line = wintop;
+	*tfile = '\0';
+	if (dir != NIL) sprintf(tfile,"%s/",dir);
+	strcat(tfile,file);
+	if ((f=open(tfile,0)) >= 0) {
+		eof = FALSE;
+		*commandprompt='\0';
+		*tline = '\0';
+		if (modflg) {
+    			sprintf(mline,"SCAME  Viewing file: %s",tfile);
+			tmodlin(mline);
+		}
+		while (!eof) {
+			getline(f,tline,min(80,screenwidth),&eof);
+			if (grepstring == NIL
+			    || strsub(tline,grepstring,FALSE,TRUE) >= 0) {
+				strcpy(screen[line],tline);
+				if (grepstring != NIL) {
+				    cp = screen[line];
+				    while ((cp = index(cp,';')) != NIL) {
+				        if (cp > screen[line] && *(cp-1) == '\\') {
+						*(cp-1) = ';';
+						*cp++ = ' ';
+					}
+					else *cp = '\0';
+				    }
+				}
+				refline(line,FALSE);
+				if (++line > winbot && !eof){
+					echo(more);
+					if ((c= inchar(FALSE)) != ' '){
+						unget(c);
+						write(1, " FLUSHED",8);
+						clearecho();
+						goto flushed;
+					}
+					echo(NIL);
+					line= wintop;
+				}
+			}
+	    	} /* while */
+		if (grepstring != NIL) {
+			strcpy(screen[line],"done");
+			refline(line,FALSE);
+			if (++line <= winbot) {
+				screen[line][0] = '\0';
+				refline(line,FALSE);
+			}
+		}
+		if (waitflg && (c= inchar(FALSE)) != ' ') unget(c);
+flushed:
+		close(f);
+		updateflag = TRUE;
+    	} /* if open */
+	else echo("Can't find file");
+	if (modflg)
+		tmodlin(NIL);
+	modeline();
+	cur(cury,curx);
+	typing = FALSE;
+	killing = FALSE;
+} /* vfile */
+
+
+/* Type Out (a bit like FT in TECO) */
+Bool typeout(str)
+char *str;
+{
+static int line;
+char c;
+	updateflag = TRUE;
+	if (!typing) {
+		if (str != NIL) strcpy(screen[wintop],str);
+		else *screen[wintop] = '\0';
+		refline(wintop,FALSE);
+		typing = TRUE;
+		line = wintop+1;
+		*screen[line] = '\0';
+		refline(line,FALSE);
+	}
+	else {
+		if (line == winbot+1) {
+			echo(more);
+			*commandprompt='\0';
+			if ((c = inchar(TRUE))!= ' ') {
+ 				unget(c);
+				write(1," FLUSHED",8);
+				clearecho();
+				return (FALSE);
+			}
+			echo(NIL);
+			line = wintop;
+			*screen[line] = '\0';
+			refline(line,FALSE);
+		} 
+		if (str != NIL) strcpy(screen[line],str);
+		else *screen[line] = '\0';
+		refline(line++,FALSE);
+		if (line <= winbot) {
+			*screen[line] = '\0';
+			refline(line,FALSE);
+		}
+ 	}
+	return (TRUE);
+}
+
+
+/*  Find File.
+ *  Search through buffers for a file. Create a new buffer
+ *  for it if it isn't found.
+ */
+
+findfile()
+{
+int i,c;
+Bool	flg;
+char tstr[FILENAMESIZE], bufname[FILENAMESIZE];
+char tprompt[80];
+struct stat fst;
+
+	basename(cb.filename,bufname,TRUE);
+    ffloop:
+	flg = FALSE;
+	i = 0;
+	while (i < noofbufs && strcmp(cb.filename,buftab[i].filename) != 0) {
+		if (strneq(bufname,buftab[i].name,strlen(bufname)+1,TRUE))
+			flg = TRUE;
+		i++;
+	}
+	if (i < noofbufs) {
+		getbuffer(buftab[i].name);
+		if (stat(cb.filename, &fst) == 0
+		    && fst.st_mtime > cb.mtime) {
+			vfile(scamelib,"changedfile",FALSE,FALSE,NIL);
+			if (yesorno("Restore file from disk") == 1)
+				revertfile();
+			typing = FALSE;
+		}
+	}
+	else {
+		if (flg) {
+			sprintf(tprompt,
+				"Name of buffer or RETURN to reuse %s: ",
+				bufname);
+			c = instring(tprompt, tstr,0," \t\033","\007\r");
+			if (c == '\007') {
+				fixbuftab(GET);
+				return;
+			}
+			else if (*tstr != '\0') {
+				strcpy(bufname, tstr);
+				goto ffloop;
+			}
+		}
+		bufname[BUFNAMESIZE-1] = '\0';
+		strcpy(tstr,cb.filename);
+		if (getbuffer(bufname)) {
+			strcpy(cb.filename,tstr);
+			readfile();
+			findmode();
+		}
+		else fixbuftab(GET);
+	}
+	killing = FALSE;
+}
+
+hangup()
+{
+char tfile[FILENAMESIZE], hupfile[FILENAMESIZE];
+char command[200];
+char *cp;
+int i;
+	sprintf(tfile,tempfile,ppid, uid);
+	strcat(tfile,"0");
+  	savescame();
+	for (i = 0; i < noofbufs; i++) {
+		tfile[strlen(tfile)-1] = '0' + i;
+		if (buftab[i].filename[0] != '\0') {
+			strncpy(hupfile, 
+				(cp= rindex(buftab[i].filename, '/')) == NIL?
+ 					buftab[i].filename: &cp[1],10);
+			hupfile[10]='\0';
+			strcat(hupfile,".hup");
+			sprintf(command, "cp %s %s",tfile,hupfile);
+			system(command);
+		}
+	}
+	exitscame(1);
+}
+@//E*O*F scame1.c//
+chmod u=rw,g=r,o= scame1.c
+ 
+echo Inspecting for damage in transit...
+temp=/tmp/shar$$; dtemp=/tmp/.shar$$
+trap "rm -f $temp $dtemp; exit" 0 1 2 3 15
+cat > $temp <<\!!!
+     308     857    6343 main.c
+     253     895    5497 screen.c
+    1248    3265   23107 scame0.c
+     578    1569   12452 scame1.c
+    2387    6586   47399 total
+!!!
+wc  main.c screen.c scame0.c scame1.c | sed 's=[^ ]*/==' | diff -b $temp - >$dtemp
+if [ -s $dtemp ]
+then echo "Ouch [diff of wc output]:" ; cat $dtemp
+else echo "No problems found."
+fi
+exit 0
