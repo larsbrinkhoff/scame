@@ -1,0 +1,591 @@
+ 5-Oct-85 07:51:54-MDT,7340;000000000000
+Return-Path: <Stabron%xls-plexus01.amc@amc-hq.arpa>
+Received: from amc-hq by SIMTEL20.ARPA with TCP; Sat 5 Oct 85 07:51:43-MDT
+Received: by AMC-HQ via hq1;  4 Oct 85 14:59 EDT
+Date:     4 Oct 85 12:28:22-EDT (Fri)
+From:     Susan Tabron <stabron%xls-plexus01.amc@amc-hq.arpa>
+To:       tabron%simtel20.arpa@amc-hq.arpa
+Subject:  [Leif Samuelsson:  SCAME patch no. 2]
+Via:  xls-plexus02; 4 Oct 85 13:14-EDT
+Via:  xls-plexus01; 4 Oct 85 14:31-EDT
+
+
+----- Forwarded message # 1:
+
+Received: From Brl-Tgr.arpa by amc-hq via smtp;  22 Feb 85 14:20 EST
+Received: from usenet by BRL-TGR.ARPA id a002988; 21 Feb 85 2:43 EST
+From: Leif Samuelsson <leif%erisun.uucp@AMC-HQ>
+Newsgroups: net.sources.bugs
+Subject: SCAME patch no. 2
+Message-ID: <307@erisun.UUCP>
+Date: 26 Feb 85 03:36:04 GMT
+Xref: seismo net.sources.bugs:242
+To:       unix-sources-bugs%brl-tgr.arpa@AMC-HQ
+Via:  Amc-Hq; 25 Feb 85 11:01-EST
+Via:  Darcom1; 25 Feb 85 11:12-EST
+Via:  Xls-Plexus01; 25 Feb 85 12:57-EST
+
+System: scame 1.0
+Patch #: 2
+Priority: Rather high
+
+Description:	
+	The parser for command and variable names does not interpret
+	a space correctly.
+
+Repeat-by:
+	Try to give the command "M-X C Mode".
+
+Fix:	From news, say "| patch -d DIR", where DIR is your scame
+	source directory.
+	Outside of news, say "cd DIR; patch <thisarticle".
+	If you don't have the patch program, apply the following
+	by hand, or get patch.
+	After re-compiling, it is necessary to start up scame with
+	the "-n" option, because the tempfiles will be invalid.
+	Before installing, make sure that no one is running scame,
+	then remove all the tempfiles in the TMPDIR directory.
+
+
+Prereq: 1.0.1
+*** 1.0/io.c	Tue Feb 19 20:32:53 1985
+--- io.c	Tue Feb 19 22:12:24 1985
+***************
+*** 1,6
+  /*	SCAME io.c			*/
+  
+! /*	Revision 1.0.1  1985-02-17	*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+
+--- 1,6 -----
+  /*	SCAME io.c			*/
+  
+! /*	Revision 1.0.2  1985-02-19	*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+***************
+*** 828,833
+  {
+  char str[80], tstr[80], *p;
+  int c, i;
+  	*str = '\0';
+  	do {
+  		c=instring(prompt, str, strlen(str), "\t", "\007\022\033\r ?");
+
+--- 828,835 -----
+  {
+  char str[80], tstr[80], *p;
+  int c, i;
++ 
++ 	/* This code should be merged with setvariable() */
+  	*str = '\0';
+  	do {
+  		c=instring(prompt, str, strlen(str), "\t", "\007\022\033\r ?");
+***************
+*** 831,837
+  	*str = '\0';
+  	do {
+  		c=instring(prompt, str, strlen(str), "\t", "\007\022\033\r ?");
+! 		if (c == 7 || (c == 13 && *str=='\0'))
+  			return(0);
+  		switch (c) {
+  		    case '\022':		/* ^R */
+
+--- 833,840 -----
+  	*str = '\0';
+  	do {
+  		c=instring(prompt, str, strlen(str), "\t", "\007\022\033\r ?");
+! 		if (c == 7 || (c == 13 && *str=='\0')) {
+! 			typing = FALSE;
+  			return(0);
+  		}
+  		switch (c) {
+***************
+*** 833,838
+  		c=instring(prompt, str, strlen(str), "\t", "\007\022\033\r ?");
+  		if (c == 7 || (c == 13 && *str=='\0'))
+  			return(0);
+  		switch (c) {
+  		    case '\022':		/* ^R */
+  			strcat(str, "^R"); break;
+
+--- 836,842 -----
+  		if (c == 7 || (c == 13 && *str=='\0')) {
+  			typing = FALSE;
+  			return(0);
++ 		}
+  		switch (c) {
+  		    case '\022':		/* ^R */
+  			strcat(str, "^R"); break;
+***************
+*** 840,847
+  			listmatching((struct tabstruct *)x_comtab,str); break;
+  		    case ' ':
+  			strcpy(tstr,str);
+! 			(void) tablk((struct tabstruct *)x_comtab,str,0);
+! 			if (strlen(str) == strlen(tstr))
+  				pchar(BELL);
+  			else if ((p=index(str+strlen(tstr), ' ')) != NIL)
+  				*(p+1) = '\0';
+
+--- 844,854 -----
+  			listmatching((struct tabstruct *)x_comtab,str); break;
+  		    case ' ':
+  			strcpy(tstr,str);
+! 			strcat(str, " ");
+! 			if (tablk((struct tabstruct *)x_comtab,str,0) <0) {
+! 			    strcpy(str,tstr);
+! 			    (void) tablk((struct tabstruct *)x_comtab,str,0);
+! 			    if (strlen(str) == strlen(tstr))
+  				pchar(BELL);
+  			}
+  			if ((p=index(str+strlen(tstr), ' ')) != NIL)
+***************
+*** 843,849
+  			(void) tablk((struct tabstruct *)x_comtab,str,0);
+  			if (strlen(str) == strlen(tstr))
+  				pchar(BELL);
+! 			else if ((p=index(str+strlen(tstr), ' ')) != NIL)
+  				*(p+1) = '\0';
+  			break;
+  		    default:
+
+--- 850,857 -----
+  			    (void) tablk((struct tabstruct *)x_comtab,str,0);
+  			    if (strlen(str) == strlen(tstr))
+  				pchar(BELL);
+! 			}
+! 			if ((p=index(str+strlen(tstr), ' ')) != NIL)
+  				*(p+1) = '\0';
+  			break;
+  		    default:
+
+Prereq: 1.0.0
+*** 1.0/vars.c	Fri Feb 15 23:51:35 1985
+--- vars.c	Tue Feb 19 22:12:36 1985
+***************
+*** 1,6
+  /*	SCAME vars.c				*/
+  
+! /*	Revision 1.0.0  1985-02-09		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+
+--- 1,6 -----
+  /*	SCAME vars.c				*/
+  
+! /*	Revision 1.0.1  1985-02-19		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+***************
+*** 35,41
+  setvariable(a)
+  long a;
+  {
+! char str[80];
+  int c,i;
+  	if (!xarg) {
+  		errmes(ILA);
+
+--- 35,41 -----
+  setvariable(a)
+  long a;
+  {
+! char str[80], tstr[80], *p;
+  int c,i;
+  	if (!xarg) {
+  		errmes(ILA);
+***************
+*** 42,47
+  		return;
+  	}
+  	*str = '\0';
+  	do {
+  		c=instring("Variable: ",str,strlen(str),"\t","\007\033\r?");
+  		if (c == 7 || (c == 13 && *str=='\0')) {
+
+--- 42,49 -----
+  		return;
+  	}
+  	*str = '\0';
++ 
++ 	/* This code should be merged with getfuncname() */
+  	do {
+  		c=instring("Variable: ",str,strlen(str),"\t","\007\033\r ?");
+  		if (c == 7 || (c == 13 && *str=='\0')) {
+***************
+*** 43,49
+  	}
+  	*str = '\0';
+  	do {
+! 		c=instring("Variable: ",str,strlen(str),"\t","\007\033\r?");
+  		if (c == 7 || (c == 13 && *str=='\0')) {
+  			typing = FALSE;
+  			return;
+
+--- 45,51 -----
+  
+  	/* This code should be merged with getfuncname() */
+  	do {
+! 		c=instring("Variable: ",str,strlen(str),"\t","\007\033\r ?");
+  		if (c == 7 || (c == 13 && *str=='\0')) {
+  			typing = FALSE;
+  			return;
+***************
+*** 48,57
+  			typing = FALSE;
+  			return;
+  		}
+! 		if (c == '?') listmatching((struct tabstruct *)vartab,str);
+! 		else if ((i = tablk((struct tabstruct *)vartab,str,0)) <0)
+! 			pchar(BELL);
+!   	} while (i<0 || c==ESC || c=='?');
+  	switch (i) {
+  		case 2: if (a >=40 && a <=100)
+  				gvars.bottom_display_margin = a;
+
+--- 50,75 -----
+  			typing = FALSE;
+  			return;
+  		}
+! 		switch (c) {
+! 		    case '?':
+! 			listmatching((struct tabstruct *)vartab,str); break;
+! 		    case ' ':
+! 			strcpy(tstr,str);
+! 			strcat(str, " ");
+! 			if (tablk((struct tabstruct *)vartab,str,0) <0) {
+! 			    strcpy(str,tstr);
+! 			    (void) tablk((struct tabstruct *)vartab,str,0);
+! 			    if (strlen(str) == strlen(tstr))
+! 				pchar(BELL);
+! 			}
+! 			if ((p=index(str+strlen(tstr), ' ')) != NIL)
+! 				*(p+1) = '\0';
+! 			break;
+! 		    default:
+! 			if ((i = tablk((struct tabstruct *)vartab,str,0)) <0)
+! 				pchar(BELL);
+! 		}
+! 	} while (i<0 || index("\033 ?", c) != NIL);
+  	switch (i) {
+  		case 2: if (a >=40 && a <=100)
+  				gvars.bottom_display_margin = a;
+
+----- End of forwarded messages
+ 5-Oct-85 07:52:08-MDT,7465;000000000000
+Return-Path: <Stabron%xls-plexus01.amc@amc-hq.arpa>
+Received: from amc-hq by SIMTEL20.ARPA with TCP; Sat 5 Oct 85 07:51:58-MDT
+Received: by AMC-HQ via hq1;  4 Oct 85 15:00 EDT
+Date:     4 Oct 85 12:29:03-EDT (Fri)
+From:     Susan Tabron <stabron%xls-plexus01.amc@amc-hq.arpa>
+To:       tabron%simtel20.arpa@amc-hq.arpa
+Subject:  [Leif Samuelsson:  SCAME patch no. 3]
+Via:  xls-plexus02; 4 Oct 85 13:15-EDT
+Via:  xls-plexus01; 4 Oct 85 14:34-EDT
+
+
+----- Forwarded message # 1:
+
+Received: From Brl-Tgr.ARPA by AMC-HQ via smtp;  24 Feb 85 17:54 EST
+Received: from usenet by BRL-TGR.ARPA id a001790; 24 Feb 85 17:40 EST
+From: Leif Samuelsson <leif%erisun.uucp@AMC-HQ>
+Newsgroups: net.sources.bugs
+Subject: SCAME patch no. 3
+Message-ID: <308@erisun.UUCP>
+Date: 23 Feb 85 16:02:06 GMT
+Xref: seismo net.sources.bugs:247
+To:       unix-sources-bugs%brl-tgr.arpa@AMC-HQ
+Via:  Amc-Hq; 24 Feb 85 19:03-EST
+Via:  Darcom1; 24 Feb 85 19:54-EST
+Via:  Xls-Plexus01; 24 Feb 85 20:13-EST
+
+System: scame 1.0
+Patch #: 3
+Priority: High
+
+Description:	
+	Four problems:
+	- On BSD4.2, the mechanism for disallowing two invocations
+	  of scame to run at the same time doesn't work. This is
+	  serious, because the tempfile handling relies on it.
+	- On many systems, Reverse I-Search doesn't work.
+	- A minor bug in Scame-reaper might cause problems.
+	- getwd() declared wrong.
+	
+Fix:	From news, say "| patch -d DIR", where DIR is your scame
+	source directory.
+	Outside of news, say "cd DIR; patch <thisarticle".
+	If you don't have the patch program, apply the following
+	by hand, or get patch.
+	After re-compiling, it is necessary to start up scame with
+	the "-n" option, because the tempfiles will be inaccurate.
+	Before re-installing, make sure that noone is running scame,
+	then remove all the tempfiles in the TMPDIR directory.
+
+
+Prereq: 1.0.0
+*** 1.0/scame.h	Fri Feb 15 23:50:51 1985
+--- scame.h	Sat Feb 23 10:09:29 1985
+***************
+*** 1,6
+  /*	SCAME scame.h				*/
+  
+! /*	Revision 1.0.0  1985-02-09		*/
+  
+  /*	Copyright (C) 1985 by Leif Samuelsson	*/
+  
+
+--- 1,6 -----
+  /*	SCAME scame.h				*/
+  
+! /*	Revision 1.0.1  1985-02-23		*/
+  
+  /*	Copyright (C) 1985 by Leif Samuelsson	*/
+  
+***************
+*** 206,214
+  extern Bool	fileexists(), filnprep(), filncpy(), filncat();
+  extern time_t	filemodified();
+  extern off_t	filesize();
+! #ifndef BSD4_2
+! extern Bool	getwd();
+! #endif
+  
+  /* Procedures in strings.c */
+  
+
+--- 206,212 -----
+  extern Bool	fileexists(), filnprep(), filncpy(), filncat();
+  extern time_t	filemodified();
+  extern off_t	filesize();
+! extern char	*getwd();
+  
+  /* Procedures in strings.c */
+  
+Prereq: 1.0.1
+*** 1.0/main.c	Tue Feb 19 20:32:51 1985
+--- main.c	Sat Feb 23 10:03:48 1985
+***************
+*** 1,6
+  /*	SCAME main.c				*/
+  
+! /*	Revision 1.0.1	1985-02-17		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+
+--- 1,6 -----
+  /*	SCAME main.c				*/
+  
+! /*	Revision 1.0.2	1985-02-23		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+***************
+*** 134,140
+  		printf("You have Scame already running somewhere\n");
+  		exit(1);
+  	}
+! 	creat(lockfile, 0600);
+  #ifdef BSD42
+  	flock(fd, LOCK_EX | LOCK_NB);
+  #endif
+
+--- 134,140 -----
+  		printf("You have Scame already running somewhere\n");
+  		exit(1);
+  	}
+! 	fd = creat(lockfile, 0600);
+  #ifdef BSD42
+  	flock(fd, LOCK_EX | LOCK_NB);
+  #endif
+Prereq: 1.0.0
+*** 1.0/files.c	Fri Feb 15 23:51:29 1985
+--- files.c	Sat Feb 23 10:10:49 1985
+***************
+*** 1,6
+  /*	SCAME files.c				*/
+  
+! /*	Revision 1.0.0  1985-02-09		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+
+--- 1,6 -----
+  /*	SCAME files.c				*/
+  
+! /*	Revision 1.0.1  1985-02-23		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+***************
+*** 13,19
+  /*
+   * Get working (current) directory
+   */
+! Bool getwd(path)
+  char path[];
+  {
+  int	file;
+
+--- 13,19 -----
+  /*
+   * Get working (current) directory
+   */
+! char *getwd(path)
+  char path[];
+  {
+  int	file;
+***************
+*** 30,36
+  	for (;;) {
+  		stat(".", &d);
+  		if (d.st_ino==rino && d.st_dev==rdev) break;
+! 		if ((file = open("..",0)) < 0) return(FALSE);
+  		fstat(file, &dd);
+  		chdir("..");
+  		if(d.st_dev == dd.st_dev) {
+
+--- 30,36 -----
+  	for (;;) {
+  		stat(".", &d);
+  		if (d.st_ino==rino && d.st_dev==rdev) break;
+! 		if ((file = open("..",0)) < 0) return(NIL);
+  		fstat(file, &dd);
+  		chdir("..");
+  		if(d.st_dev == dd.st_dev) {
+***************
+*** 37,43
+  			if(d.st_ino == dd.st_ino) break;
+  			do {
+  				if (read(file, (char *)&dir,
+! 				    sizeof(dir)) < sizeof(dir)) return(FALSE);
+  			} while (dir.d_ino != d.st_ino);
+  		}
+  		else do {
+
+--- 37,43 -----
+  			if(d.st_ino == dd.st_ino) break;
+  			do {
+  				if (read(file, (char *)&dir,
+! 				    sizeof(dir)) < sizeof(dir)) return(NIL);
+  			} while (dir.d_ino != d.st_ino);
+  		}
+  		else do {
+***************
+*** 42,48
+  		}
+  		else do {
+  				if(read(file, (char *)&dir,
+! 				    sizeof(dir)) < sizeof(dir)) return(FALSE);
+  				stat(dir.d_name, &dd);
+  			} while(dd.st_ino!= d.st_ino || dd.st_dev != d.st_dev);
+  		close(file);
+
+--- 42,48 -----
+  		}
+  		else do {
+  				if(read(file, (char *)&dir,
+! 				    sizeof(dir)) < sizeof(dir)) return(NIL);
+  				stat(dir.d_name, &dd);
+  			} while(dd.st_ino!= d.st_ino || dd.st_dev != d.st_dev);
+  		close(file);
+***************
+*** 62,68
+  	path[off] = '\0';
+  	close(file);
+  	chdir(path);
+! 	return(TRUE);
+  }
+  #endif
+  
+
+--- 62,68 -----
+  	path[off] = '\0';
+  	close(file);
+  	chdir(path);
+! 	return(path);
+  }
+  #endif
+  
+Prereq: 1.0.0
+*** 1.0/search.c	Fri Feb 15 23:51:29 1985
+--- search.c	Sat Feb 23 10:06:21 1985
+***************
+*** 1,6
+  /*	SCAME search.c				*/
+  
+! /*	Revision 1.0.0  1985-02-09		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+
+--- 1,6 -----
+  /*	SCAME search.c				*/
+  
+! /*	Revision 1.0.1  1985-02-23		*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+***************
+*** 206,211
+  		else {
+  			dot = tdot;
+  			dot= tdot;
+  		}
+  	}
+  }
+
+--- 206,212 -----
+  		else {
+  			dot = tdot;
+  			dot= tdot;
++ 			return(TRUE);
+  		}
+  	}
+  }
+Prereq: 1.0.1
+*** 1.0/scame-reaper.c	Tue Feb 19 20:33:00 1985
+--- scame-reaper.c	Tue Feb 19 20:40:52 1985
+***************
+*** 1,6
+  /*	SCAME scame-reaper.c		*/
+  
+! /*	Revision 1.0.1  1985-02-15	*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+
+--- 1,6 -----
+  /*	SCAME scame-reaper.c		*/
+  
+! /*	Revision 1.0.2  1985-02-19	*/
+  
+  static char *cpyrid = "@(#)Copyright (C) 1985 by Leif Samuelsson";
+  
+***************
+*** 70,76
+  		if (dp->d_ino == 0 || dp->d_name[0] != 'S')
+   			continue;
+  		for (i=1; i <= 10; i++)
+! 			if (dp->d_name[i] < '0' || dp->d_name[1] > '9')
+  				goto loop;
+  		nentries++;
+  		sscanf(dp->d_name, "%*[^0123456789]%5d", &pid);
+
+--- 70,76 -----
+  		if (dp->d_ino == 0 || dp->d_name[0] != 'S')
+   			continue;
+  		for (i=1; i <= 10; i++)
+! 			if (dp->d_name[i] < '0' || dp->d_name[i] > '9')
+  				goto loop;
+  		nentries++;
+  		sscanf(dp->d_name, "%*[^0123456789]%5d", &pid);
+
+----- End of forwarded messages
